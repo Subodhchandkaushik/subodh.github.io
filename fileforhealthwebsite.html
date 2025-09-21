@@ -1,0 +1,419 @@
+<!--
+DailyHealthTracker.html
+Single-file responsive website for tracking daily health: water intake, meals (healthy/unhealthy/outside), habits, sleep, mood.
+Features:
+ - Water tracker with bottle increments and quick-add
+ - Meal logger with "eating outside" toggle and calorie estimate field
+ - Habit tracker for unhealthy habits
+ - Summary cards (today's totals)
+ - Interactive charts (Chart.js CDN) for weekly overview
+ - LocalStorage persistence, export/import JSON
+ - Clean modern design, accessible, mobile-first
+
+To use: save this file as DailyHealthTracker.html and open in a browser. Everything runs client-side.
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Daily Health Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root{
+      --bg:#0f1724; /* deep navy */
+      --card:#0b1320;
+      --muted:#9aa4b2;
+      --accent:#7c5cff; /* purple */
+      --accent-2:#34d399; /* green */
+      --glass: rgba(255,255,255,0.04);
+      --radius:14px;
+      --mono: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--mono);
+      background:linear-gradient(180deg, #071026 0%, #071129 50%, #06121a 100%);
+      color:#e6eef8;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      padding:28px;
+    }
+    .container{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr;gap:18px}
+
+    header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#5eead4);display:flex;align-items:center;justify-content:center;font-weight:700;color:#021025}
+    h1{margin:0;font-size:20px}
+    p.lead{margin:0;color:var(--muted);font-size:13px}
+
+    .grid{display:grid;grid-template-columns:1fr 360px;gap:18px}
+    @media (max-width:920px){.grid{grid-template-columns:1fr}}
+
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:var(--radius);padding:16px;box-shadow:0 6px 20px rgba(2,6,23,0.6);}
+
+    /* top controls */
+    .top-controls{display:flex;gap:12px;flex-wrap:wrap}
+    .btn{background:var(--glass);border:1px solid rgba(255,255,255,0.03);padding:10px 12px;border-radius:10px;color:inherit;cursor:pointer;font-weight:600}
+    .btn.primary{background:linear-gradient(90deg,var(--accent),#5e8bff);color:#021025;border:none}
+
+    /* water tracker */
+    .water-row{display:flex;align-items:center;gap:12px}
+    .water-display{font-size:28px;font-weight:700}
+    .progress{height:12px;background:rgba(255,255,255,0.04);border-radius:999px;overflow:hidden;width:100%}
+    .progress > i{display:block;height:100%;background:linear-gradient(90deg,var(--accent-2),#06b6d4);width:0%}
+
+    /* logs */
+    .logs{display:flex;flex-direction:column;gap:12px}
+    .log-item{display:flex;justify-content:space-between;gap:12px;padding:10px;border-radius:10px;background:rgba(255,255,255,0.01)}
+    .pill{padding:6px 8px;border-radius:999px;font-size:12px}
+    .pill.bad{background:rgba(255,69,92,0.12);color:#ffb3ba}
+    .pill.good{background:rgba(34,197,94,0.12);color:#bbffda}
+
+    /* habits */
+    .habit-list{display:flex;flex-direction:column;gap:8px}
+    .habit{display:flex;align-items:center;gap:12px}
+    .switch{position:relative;width:44px;height:26px;background:rgba(255,255,255,0.06);border-radius:999px;padding:3px;cursor:pointer}
+    .switch > b{display:block;width:20px;height:20px;border-radius:50%;background:white;transition:transform .18s ease}
+    .switch.on{background:linear-gradient(90deg,var(--accent),#9ce7c6)}
+    .tiny{font-size:12px;color:var(--muted)}
+
+    /* footer utilities */
+    .row{display:flex;align-items:center;gap:12px}
+    .space{flex:1}
+
+    /* charts */
+    .chart-wrap{height:220px}
+
+    /* export/import area */
+    .export-area{display:flex;gap:8px;flex-wrap:wrap}
+    textarea{width:100%;min-height:90px;background:transparent;border:1px dashed rgba(255,255,255,0.04);padding:8px;color:var(--muted);border-radius:8px}
+
+    footer.small{font-size:12px;color:var(--muted);text-align:center;margin-top:8px}
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="brand">
+        <div class="logo">DH</div>
+        <div>
+          <h1>Daily Health Tracker</h1>
+          <p class="lead">Track water, meals, and unhealthy habits — local-only, privacy-first.</p>
+        </div>
+      </div>
+      <div class="top-controls">
+        <button class="btn" id="resetBtn">Reset day</button>
+        <button class="btn primary" id="exportBtn">Export data</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <!-- left: main trackers -->
+      <section>
+        <div class="card">
+          <h2 style="margin-top:0">Water Intake</h2>
+          <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+            <div>
+              <div class="water-display" id="waterAmount">0 ml</div>
+              <div class="tiny">Goal: <strong id="waterGoal">2000</strong> ml</div>
+            </div>
+            <div style="flex:1">
+              <div class="progress" aria-hidden="true"><i id="waterBar"></i></div>
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="btn" onclick="addWater(50)">+50 ml</button>
+                <button class="btn" onclick="addWater(200)">+200 ml</button>
+                <button class="btn" onclick="addWater(350)">+350 ml</button>
+                <button class="btn" onclick="addWater(500)">+500 ml</button>
+                <input id="customWater" type="number" placeholder="custom ml" style="width:110px;padding:8px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.03);color:inherit" />
+                <button class="btn" onclick="addCustomWater()">Add</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h2 style="margin-top:0">Meals & Eating Habits</h2>
+          <form id="mealForm" onsubmit="event.preventDefault();addMeal()" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input id="mealName" placeholder="Meal name (e.g., Lunch)" style="flex:1;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:inherit" required />
+            <input id="mealCal" type="number" placeholder="cal (optional)" style="width:110px;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:inherit" />
+            <label class="tiny" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mealOutside"/> Eating outside</label>
+            <button class="btn primary" type="submit">Add meal</button>
+          </form>
+
+          <div style="margin-top:12px">
+            <div class="logs" id="mealLogs"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h2 style="margin-top:0">Unhealthy Habits</h2>
+          <div class="habit-list" id="habitList">
+            <!-- habit rows injected by JS -->
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <input id="newHabit" placeholder="Add habit (e.g., Eating outside)" style="flex:1;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.03);background:transparent;color:inherit" />
+            <button class="btn" onclick="addHabit()">Add</button>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- right: summary + chart -->
+      <aside>
+        <div class="card">
+          <h3 style="margin-top:0">Today's Summary</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div class="card" style="padding:12px;background:rgba(255,255,255,0.02)">
+              <div class="tiny">Water</div>
+              <div id="summaryWater" style="font-weight:700;font-size:18px">0 ml</div>
+            </div>
+            <div class="card" style="padding:12px;background:rgba(255,255,255,0.02)">
+              <div class="tiny">Meals</div>
+              <div id="summaryMeals" style="font-weight:700;font-size:18px">0</div>
+            </div>
+            <div class="card" style="padding:12px;background:rgba(255,255,255,0.02)">
+              <div class="tiny">Outside meals</div>
+              <div id="summaryOutside" style="font-weight:700;font-size:18px">0</div>
+            </div>
+            <div class="card" style="padding:12px;background:rgba(255,255,255,0.02)">
+              <div class="tiny">Unhealthy habits</div>
+              <div id="summaryHabits" style="font-weight:700;font-size:18px">0</div>
+            </div>
+          </div>
+
+          <div style="margin-top:12px">
+            <div class="tiny">Sleep hours</div>
+            <input id="sleepHours" type="number" min="0" max="24" placeholder="e.g., 7" style="width:100%;padding:8px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,0.03);color:inherit" />
+          </div>
+          <div style="margin-top:10px">
+            <div class="tiny">Mood</div>
+            <input id="mood" type="range" min="0" max="10" value="6" style="width:100%" />
+          </div>
+
+          <div style="margin-top:12px" class="row">
+            <button class="btn" onclick="saveQuick()">Save quick</button>
+            <div class="space"></div>
+            <button class="btn" onclick="clearAll()">Clear</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h3 style="margin-top:0">Weekly Overview</h3>
+          <div class="chart-wrap">
+            <canvas id="weeklyChart"></canvas>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:12px">
+          <h3 style="margin-top:0">Data backup</h3>
+          <div class="export-area">
+            <button class="btn" id="downloadJson">Download JSON</button>
+            <button class="btn" id="loadJsonBtn">Load JSON</button>
+            <input id="fileInput" type="file" accept="application/json" style="display:none" />
+          </div>
+          <div style="margin-top:8px"><small class="tiny">All data is stored locally on your device using localStorage.</small></div>
+        </div>
+      </aside>
+    </main>
+
+    <section style="margin-top:18px">
+      <div class="card">
+        <h3 style="margin-top:0">Raw export / import</h3>
+        <textarea id="rawExport" placeholder="Exported JSON will appear here"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn" id="copyExport">Copy</button>
+          <button class="btn" id="pasteImport">Paste to import</button>
+          <button class="btn" id="clearStorage">Clear all data</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="small">Built with ❤️ — single-file, privacy-first tracker. Open-source style: copy & adapt.</footer>
+  </div>
+
+  <script>
+    // basic data model stored in localStorage under key 'dht_state'
+    const DEFAULT = {
+      date: getTodayKey(),
+      waterGoal: 2000,
+      water: 0,
+      meals: [], // {name, cal, outside, time}
+      habits: [
+        {id: id(),name:'Eating outside',on:false,count:0},
+        {id: id(),name:'Late-night snacking',on:false,count:0},
+        {id: id(),name:'Sugary drinks',on:false,count:0}
+      ],
+      sleep: null,
+      mood:6,
+      history: {} // keyed by date for weekly chart
+    }
+
+    function id(){return Math.random().toString(36).slice(2,9)}
+
+    function getTodayKey(){ const d=new Date(); return d.toISOString().slice(0,10) }
+
+    function load(){
+      const raw=localStorage.getItem('dht_state')
+      if(!raw) { localStorage.setItem('dht_state',JSON.stringify(DEFAULT)); return JSON.parse(JSON.stringify(DEFAULT)) }
+      try{ const state=JSON.parse(raw)
+        if(state.date!==getTodayKey()){
+          // when new day, roll today's snapshot into history and reset daily fields
+          state.history = state.history || {}
+          state.history[state.date] = {water:state.water,meals:state.meals,habits:state.habits.map(h=>({name:h.name,count:h.count})),sleep:state.sleep,mood:state.mood}
+          state.date = getTodayKey()
+          state.water = 0
+          state.meals = []
+          state.habits = state.habits.map(h=>({...h,count:0}))
+          state.sleep = null
+          state.mood = 6
+          localStorage.setItem('dht_state',JSON.stringify(state))
+        }
+        return state
+      }catch(e){ console.error(e); localStorage.removeItem('dht_state'); localStorage.setItem('dht_state',JSON.stringify(DEFAULT)); return JSON.parse(JSON.stringify(DEFAULT)) }
+    }
+
+    let state = load()
+
+    // UI references
+    const waterAmount = document.getElementById('waterAmount')
+    const waterBar = document.getElementById('waterBar')
+    const waterGoalEl = document.getElementById('waterGoal')
+    const mealLogs = document.getElementById('mealLogs')
+    const summaryWater = document.getElementById('summaryWater')
+    const summaryMeals = document.getElementById('summaryMeals')
+    const summaryOutside = document.getElementById('summaryOutside')
+    const summaryHabits = document.getElementById('summaryHabits')
+    const habitList = document.getElementById('habitList')
+    const rawExport = document.getElementById('rawExport')
+    const sleepHours = document.getElementById('sleepHours')
+    const moodRange = document.getElementById('mood')
+
+    function render(){
+      waterAmount.textContent = state.water + ' ml'
+      waterGoalEl.textContent = state.waterGoal
+      const pct = Math.min(100, Math.round((state.water/state.waterGoal)*100))
+      waterBar.style.width = pct + '%'
+
+      // meals
+      mealLogs.innerHTML = ''
+      state.meals.slice().reverse().forEach((m,idx)=>{
+        const el = document.createElement('div'); el.className='log-item'
+        el.innerHTML = `<div><strong>${escapeHtml(m.name)}</strong> <div class=\"tiny\">${new Date(m.time).toLocaleTimeString()} ${m.cal? '• ' + m.cal + ' kcal':''}</div></div><div style=\"text-align:right\">${m.outside?'<span class=\"pill bad\">Outside</span>':'<span class=\"pill good\">Home</span>'}<div style=\"margin-top:8px\"><button class=\"btn\" onclick=\"removeMeal('${m.id}')\">Delete</button></div></div>`
+        mealLogs.appendChild(el)
+      })
+
+      // summary
+      summaryWater.textContent = state.water + ' ml'
+      summaryMeals.textContent = state.meals.length
+      summaryOutside.textContent = state.meals.filter(m=>m.outside).length
+      summaryHabits.textContent = state.habits.filter(h=>h.on).length
+
+      // habits
+      habitList.innerHTML = ''
+      state.habits.forEach(h=>{
+        const row = document.createElement('div'); row.className='habit'
+        row.innerHTML = `<div style=\"flex:1\"><strong>${escapeHtml(h.name)}</strong><div class=\"tiny\">times today: ${h.count}</div></div><div style=\"display:flex;flex-direction:column;align-items:flex-end;gap:6px\"><div class=\"switch ${h.on? 'on':''}\" onclick=\"toggleHabit('${h.id}')\"><b></b></div><div style=\"display:flex;gap:6px\"><button class=\"btn\" onclick=\"incrementHabit('${h.id}')\">+1</button><button class=\"btn\" onclick=\"editHabit('${h.id}')\">Edit</button></div></div>`
+        habitList.appendChild(row)
+      })
+
+      // sleep & mood
+      sleepHours.value = state.sleep === null ? '' : state.sleep
+      moodRange.value = state.mood || 6
+
+      // export text
+      rawExport.value = JSON.stringify(state, null, 2)
+
+      saveState()
+      updateChart()
+    }
+
+    function saveState(){ localStorage.setItem('dht_state',JSON.stringify(state)) }
+
+    function addWater(amt){ state.water = Math.max(0, state.water + Number(amt)); render(); }
+    function addCustomWater(){ const v=document.getElementById('customWater').value; if(!v) return; addWater(Number(v)); document.getElementById('customWater').value=''; }
+
+    function addMeal(){ const name=document.getElementById('mealName').value.trim(); if(!name) return; const cal=document.getElementById('mealCal').value; const outside=document.getElementById('mealOutside').checked; const meal={id:id(),name,cal:cal?Number(cal):null,outside,time:Date.now()}; state.meals.push(meal); if(outside){ // increment eating-out habit if exists
+      const h = state.habits.find(x=>x.name.toLowerCase().includes('eat')||x.name.toLowerCase().includes('outside'))
+      if(h){ h.count = (h.count||0)+1; h.on=true }
+    }
+    document.getElementById('mealForm').reset(); render(); }
+
+    function removeMeal(id){ state.meals = state.meals.filter(m=>m.id!==id); render(); }
+
+    function addHabit(){ const name = document.getElementById('newHabit').value.trim(); if(!name) return; state.habits.push({id:id(),name,on:false,count:0}); document.getElementById('newHabit').value=''; render(); }
+    function toggleHabit(hid){ const h = state.habits.find(x=>x.id===hid); if(!h) return; h.on = !h.on; if(!h.on) h.count = 0; render(); }
+    function incrementHabit(hid){ const h = state.habits.find(x=>x.id===hid); if(!h) return; h.count = (h.count||0)+1; h.on = true; render(); }
+    function editHabit(hid){ const h = state.habits.find(x=>x.id===hid); if(!h) return; const name = prompt('Edit habit name', h.name); if(name) { h.name = name.trim(); render() } }
+
+    function saveQuick(){ state.sleep = sleepHours.value? Number(sleepHours.value):null; state.mood = Number(moodRange.value); render(); alert('Saved quick snapshot for today') }
+    function clearAll(){ if(!confirm('Clear daily water, meals and reset habit counts?')) return; state.water = 0; state.meals=[]; state.habits=state.habits.map(h=>({...h,count:0,on:false})); state.sleep=null; state.mood=6; render(); }
+
+    function resetDay(){ if(!confirm('Reset to a fresh day? This will archive today into history.')) return; // move to history
+      state.history = state.history || {}
+      state.history[state.date] = {water:state.water,meals:state.meals,habits:state.habits.map(h=>({name:h.name,count:h.count})),sleep:state.sleep,mood:state.mood}
+      state.date = getTodayKey(); state.water=0; state.meals=[]; state.habits=state.habits.map(h=>({...h,count:0,on:false})); state.sleep=null; state.mood=6; render(); }
+
+    function escapeHtml(s){ return String(s).replace(/[&<>\"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])) }
+
+    // import/export
+    document.getElementById('exportBtn').addEventListener('click', ()=>{ rawExport.select(); document.execCommand('copy'); alert('JSON copied to clipboard') })
+    document.getElementById('downloadJson').addEventListener('click', ()=>{
+      const data = JSON.stringify(state, null, 2); const blob=new Blob([data],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='daily-health-'+state.date+'.json'; a.click(); URL.revokeObjectURL(url);
+    })
+    document.getElementById('loadJsonBtn').addEventListener('click', ()=>document.getElementById('fileInput').click())
+    document.getElementById('fileInput').addEventListener('change', (e)=>{
+      const f=e.target.files[0]; if(!f) return; const reader=new FileReader(); reader.onload = ()=>{ try{ const j=JSON.parse(reader.result); state=j; saveState(); render(); alert('Loaded data') }catch(err){ alert('Invalid JSON') }}; reader.readAsText(f);
+    })
+    document.getElementById('copyExport').addEventListener('click', ()=>{ rawExport.select(); document.execCommand('copy'); alert('Copied') })
+    document.getElementById('pasteImport').addEventListener('click', ()=>{
+      try{ const j = JSON.parse(rawExport.value); state = j; saveState(); render(); alert('Imported') }catch(e){ alert('Invalid JSON') }
+    })
+    document.getElementById('clearStorage').addEventListener('click', ()=>{ if(confirm('Remove all stored data?')){ localStorage.removeItem('dht_state'); state = JSON.parse(JSON.stringify(DEFAULT)); render(); alert('Cleared') } })
+    document.getElementById('resetBtn').addEventListener('click', resetDay)
+
+    // remove meal exposed globally (used in onclick strings)
+    window.removeMeal = removeMeal
+    window.toggleHabit = toggleHabit
+    window.incrementHabit = incrementHabit
+    window.editHabit = editHabit
+
+    // charting
+    const ctx = document.getElementById('weeklyChart').getContext('2d')
+    let chart = null
+    function updateChart(){
+      // produce last 7 days array
+      const today = new Date(getTodayKey())
+      const labels = []
+      const waterData = []
+      for(let i=6;i>=0;i--){ const d = new Date(today); d.setDate(today.getDate()-i); const key = d.toISOString().slice(0,10); labels.push(key.slice(5)); const snap = state.history && state.history[key] ? state.history[key] : (key===state.date? {water:state.water}: {water:0}); waterData.push(snap.water||0) }
+
+      if(chart) { chart.data.labels = labels; chart.data.datasets[0].data = waterData; chart.update(); return }
+
+      chart = new Chart(ctx, {
+        type:'bar',
+        data:{labels, datasets:[{label:'Water (ml)',data:waterData,backgroundColor:'rgba(124,92,255,0.8)'}]},
+        options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}
+      })
+    }
+
+    // helpers for file download/upload compatibility
+    document.getElementById('downloadJson')
+
+    // initialize render
+    render()
+
+    // small UX: handle keyboard Enter on add water custom
+    document.getElementById('customWater').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ addCustomWater() } })
+
+  </script>
+</body>
+</html>
